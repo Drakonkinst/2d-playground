@@ -48,7 +48,18 @@ function addStaticObject(x, y, sprite) {
     }
     staticObjects[info.id] = info;
     console.log("Created static object with id " + info.id);
+    io.emit("staticObjectSpawned", info);
     return info.id;
+}
+
+function deleteStaticObject(id) {
+    if(!staticObjects.hasOwnProperty(id)) {
+        console.log("No object found!");
+        return;
+    }
+    delete staticObjects[id];
+    io.emit("staticObjectDespawned", id);
+    console.log("Despawned static object with id " + id);
 }
 
 app.use(express.static(__dirname + "/public"));
@@ -90,8 +101,11 @@ io.on("connection", client => {
     });
     
     client.on("spawnStaticObject", info => {
-        const id = addStaticObject(info.x, info.y, info.sprite);
-        io.emit("staticObjectSpawned", staticObjects[id]);
+        addStaticObject(info.x, info.y, info.sprite);
+    });
+    
+    client.on("despawnStaticObject", id => {
+        deleteStaticObject(id);
     });
 });
 

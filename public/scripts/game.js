@@ -200,6 +200,10 @@ const Game = (() => {
         socket.on("staticObjectSpawned", info => {
             addStaticObject(info);
         });
+        
+        socket.on("staticObjectDespawned", id => {
+            deleteStaticObject(id);
+        });
     }
     
     function loadCurrentPlayers(players) {
@@ -231,7 +235,17 @@ const Game = (() => {
     }
     
     function addStaticObject(info) {
-        scene.obstacles.create(info.x, info.y, info.sprite);
+        // TODO may have to wrap around this at some point like player for additional behavior
+        const staticObject = scene.obstacles.create(info.x, info.y, info.sprite);
+        staticObject.id = info.id;
+    }
+    
+    function deleteStaticObject(id) {
+        scene.obstacles.getChildren().forEach(obstacle => {
+            if(obstacle.id == id) {
+                obstacle.destroy();
+            }
+        });
     }
 
     /* UPDATE */
@@ -275,6 +289,10 @@ const Game = (() => {
                 sprite: sprite
             };
             socket.emit("spawnStaticObject", info);
+        },
+        
+        despawnStaticObject(id) {
+            socket.emit("despawnStaticObject", id);
         },
         
         getGame() {
