@@ -26,6 +26,8 @@ const Game = (() => {
     let inputHandler;
     let socket;
     let instantCameraFrame = false;
+    
+    const otherPlayers = {};
 
     function preload() {
         this.load.image("floor", "assets/floor.png");
@@ -66,8 +68,6 @@ const Game = (() => {
 
         // Setup obstacles
         scene.obstacles = scene.physics.add.staticGroup(); //create group for obstacles
-        scene.obstacles.create(800, 600, "obstacle");
-        scene.obstacles.create(900, 800, "obstacle");
         scene.physics.add.collider(scene.player.obj, scene.obstacles); //collision detection between player and obstacles
 
         /*
@@ -165,16 +165,9 @@ const Game = (() => {
         socket = io();
         scene.otherPlayers = scene.physics.add.group();
 
-        socket.on("currentPlayers", players => {
-            for(id in players) {
-                const otherPlayer = players[id];
-                if(otherPlayer.playerId === socket.id) {
-                    scene.player.setPosition(otherPlayer.x, otherPlayer.y);
-                    teleportCameraNextFrame();
-                } else {
-                    addOtherPlayer(otherPlayer);
-                }
-            }
+        socket.on("currentWorldState", (players, staticObjects, dynamicObjects) => {
+            loadCurrentPlayers(players);
+            loadStaticObjects(staticObjects);
         });
 
         socket.on("playerConnect", playerInfo => {
@@ -183,66 +176,62 @@ const Game = (() => {
         });
 
         socket.on("playerDisconnect", playerId => {
-            scene.otherPlayers.getChildren().forEach(otherPlayer => {
-                if(playerId === otherPlayer.playerId) {
-                    deleteOtherPlayer(otherPlayer)
+            for(const otherPlayerModel of Object.values(otherPlayers)) {
+                if(playerId === otherPlayerModel.playerId) {
+                    deleteOtherPlayer(otherPlayerModel);
                 }
-            });
+            }
         });
 
         socket.on("playerMoved", playerInfo => {
-            scene.otherPlayers.getChildren().forEach(otherPlayer => {
-                if(playerInfo.playerId === otherPlayer.playerId) {
-                    otherPlayer.setPosition(playerInfo.x, playerInfo.y);
-                    otherPlayer.setRotation(playerInfo.rotation);
+            for(const otherPlayerModel of Object.values(otherPlayers)) {
+                if(playerInfo.playerId === otherPlayerModel.playerId) {
+                    otherPlayerModel.obj.setPosition(playerInfo.x, playerInfo.y);
+                    otherPlayerModel.obj.setRotation(playerInfo.rotation);
+                    if(playerInfo.dashing && !otherPlayerModel.isDashing()) {
+                        otherPlayerModel.startDashing();
+                    } else if(!playerInfo.dashing && otherPlayerModel.isDashing()) {
+                        otherPlayerModel.stopDashing();
+                    }
                 }
-            });
+            };
         });
-    }
-
-    function addOtherPlayer(playerInfo) {
-        const NAMETAG_OFFSET = -40;
-        const FONT_SIZE = 16;
-
-        const otherPlayerSprite = scene.add.sprite(0, 0, "other")
-            .setScale(scene.player.getSpriteScale());
-        const otherPlayerNametag = scene.add.text(0, 0, playerInfo.name, {
-            fontFamily: 'Arial',
-            color: '#000000',
-            fontStyle: "bold",
-            align: 'center'
-        }).setFontSize(FONT_SIZE)
-            .setOrigin(0.5)
-            .setY(NAMETAG_OFFSET)
-        const otherPlayer = scene.add.container(playerInfo.x, playerInfo.y)
-            .setRotation(playerInfo.rotation)
-            .add(otherPlayerSprite)
-            .add(otherPlayerNametag)
-
-        otherPlayer.playerId = playerInfo.playerId;
-        scene.otherPlayers.add(otherPlayer);
         
-        // fade in
-        const FADE_IN_TIME = 400;
-        otherPlayer.setAlpha(0);
-        scene.tweens.add({
-            targets: otherPlayer,
-            alpha: 1,
-            duration: FADE_IN_TIME
+        socket.on("staticObjectSpawned", info => {
+            addStaticObject(info);
         });
     }
     
-    function deleteOtherPlayer(playerObj) {
-        const FADE_OUT_TIME = 400;
-        scene.tweens.add({
-            targets: playerObj,
-            alpha: 0,
-            duration: FADE_OUT_TIME,
-            onComplete: () => {
-                // Can also set onCompleteScope if needed
-                playerObj.destroy();
+    function loadCurrentPlayers(players) {
+        for(id in players) {
+            const otherPlayer = players[id];
+            if(otherPlayer.playerId === socket.id) {
+                scene.player.setPosition(otherPlayer.x, otherPlayer.y);
+                teleportCameraNextFrame();
+            } else {
+                addOtherPlayer(otherPlayer);
             }
-        });
+        }
+    }
+
+    function addOtherPlayer(playerInfo) {
+        const playerModel = new PlayerModel(scene, playerInfo);
+        otherPlayers[playerInfo.playerId] = playerModel;
+    }
+    
+    function deleteOtherPlayer(playerModel) {
+        playerModel.onDestroy();
+        delete otherPlayers[playerModel.playerId];
+    }
+    
+    function loadStaticObjects(staticObjects) {
+        for(const obstacleInfo of Object.values(staticObjects)) {
+            addStaticObject(obstacleInfo);
+        }
+    }
+    
+    function addStaticObject(info) {
+        scene.obstacles.create(info.x, info.y, info.sprite);
     }
 
     /* UPDATE */
@@ -253,19 +242,7 @@ const Game = (() => {
             scene.cameras.main.setLerp(CAMERA_SPEED, CAMERA_SPEED);
         }
 
-        const self = this;
-        this.player.updatePlayer();
-
-        /*
-        scene.boxes.getChildren().forEach(box => {
-            //console.log(box.body.blocked.none);
-            if(box.body.blocked.top || box.body.touching.top) {
-                //console.log("BOX");
-                box.setVelocityX(0);
-            }
-            //console.log(box);
-        });
-        */
+        this.player.onUpdate();
     }
 
     function cameraIsInstant() {
@@ -278,6 +255,28 @@ const Game = (() => {
     }
 
     return {
+        createDustParticleEmitter() {
+            const emitter = scene.particleManager.dustParticle.createEmitter({
+                speed: 80,
+                scale: 0.2,
+                lifespan: 2000
+            });
+            emitter.setAlpha(function (p, k, t) {
+                return 1 - t;
+            });
+            emitter.stop();
+            return emitter;
+        },
+        
+        spawnStaticObject(x, y, sprite) {
+            const info = {
+                x: x,
+                y: y,
+                sprite: sprite
+            };
+            socket.emit("spawnStaticObject", info);
+        },
+        
         getGame() {
             return game;
         },
@@ -288,6 +287,10 @@ const Game = (() => {
         
         getSocket() {
             return socket;
+        },
+        
+        getOtherPlayers() {
+            return otherPlayers;
         }
     };
 })();

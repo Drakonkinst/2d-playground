@@ -22,22 +22,14 @@ const MyPlayer = (() => {
                 y: y,
                 rotation: 0
             };
-
-            this.dashEmitter = scene.particleManager.dustParticle.createEmitter({
-                speed: 80,
-                scale: 0.2,
-                lifespan: 2000
-            });
-            this.dashEmitter.setAlpha(function (p, k, t) {
-                return 1 - t;
-            });
-            this.dashEmitter.startFollow(this.obj);
-            this.dashEmitter.stop();
+            
+            this.dashEmitter = Game.createDustParticleEmitter().startFollow(this.obj);
         }
 
-        updatePlayer() {
+        onUpdate() {
             if(this.canDash()) {
                 if(this.dashEmitter.on) {
+                    this.sendMovementUpdate();
                     this.dashEmitter.stop();
                 }
             }
@@ -48,14 +40,19 @@ const MyPlayer = (() => {
 
             // emit player movement
             if(playerHasMoved(this.obj, this.oldPosition)) {
-                let newPos = {
-                    x: this.obj.x,
-                    y: this.obj.y,
-                    rotation: this.obj.rotation
-                }
-                Game.getSocket().emit("playerMovement", newPos)
-                this.oldPosition = newPos;
+                this.sendMovementUpdate();
             }
+        }
+        
+        sendMovementUpdate() {
+            let newPos = {
+                x: this.obj.x,
+                y: this.obj.y,
+                rotation: this.obj.rotation,
+                dashing: !this.canDash()
+            }
+            Game.getSocket().emit("playerMovement", newPos)
+            this.oldPosition = newPos;
         }
 
         attemptDash() {

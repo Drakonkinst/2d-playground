@@ -25,16 +25,38 @@ const ANIMALS = [
 ];
 
 const players = {};
+const staticObjects = {};
+const dynamicObjects = {};
 
 function choice(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+function addStaticObject(x, y, sprite) {
+    const info = {
+        id: generateUUID(),
+        x: x,
+        y: y,
+        sprite: sprite
+    }
+    staticObjects[info.id] = info;
+    console.log("Created static object with id " + info.id);
+    return info.id;
+}
+
 app.use(express.static(__dirname + "/public"));
 app.get("/", function (req, res) {
     res.sendFile(__dirname + "/index.html");
-})
+});
 
+// https://stackoverflow.com/questions/10058226/send-response-to-all-clients-except-sender
 io.on("connection", client => {
     let x = Math.floor(Math.random() * 700) + 50;
     let y = Math.floor(Math.random() * 500) + 50;
@@ -47,7 +69,8 @@ io.on("connection", client => {
         playerId: client.id,
     };
     players[client.id] = playerInfo
-    client.emit("currentPlayers", players);
+    //client.emit("currentPlayers", players);
+    client.emit("currentWorldState", players, staticObjects, dynamicObjects);
     client.broadcast.emit("playerConnect", playerInfo);
     console.log("A user connected!", client.id, "(" + name + ")");
     
@@ -62,10 +85,18 @@ io.on("connection", client => {
         playerInfo.x = movementData.x;
         playerInfo.y = movementData.y;
         playerInfo.rotation = movementData.rotation;
+        playerInfo.dashing = movementData.dashing;
         client.broadcast.emit("playerMoved", playerInfo);
+    });
+    
+    client.on("spawnStaticObject", info => {
+        const id = addStaticObject(info.x, info.y, info.sprite);
+        io.emit("staticObjectSpawned", staticObjects[id]);
     });
 });
 
 server.listen(PORT, function () {
     console.log("Listening on " + server.address().port);
+    addStaticObject(300, 300, "obstacle");
+    addStaticObject(500, 500, "obstacle");
 });
