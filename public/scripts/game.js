@@ -10,6 +10,9 @@ const Input = (() => {
                 down: 'S',
                 right: 'D'
             });
+            game.input.keyboard.on("keydown-SPACE", function() {
+                game.player.attemptDash();
+            });
         }
 
         up() {
@@ -32,16 +35,55 @@ const Input = (() => {
 
 const MyPlayer = (() => {
     const MAX_VELOCITY = 200;
+    const DASH_VELOCITY = 500;
+    const MAX_DASH_TIME = 250;
+    const MAX_DASH_COOLDOWN = 50;
+    const SPRITE_SCALE = 0.5;
 
     return class MyPlayer {
-        constructor(game, x, y) {
+        constructor(game, scene, x, y) {
             this.game = game;
-            this.obj = game.physics.add.sprite(x, y, "circle").setScale(0.5);
+            this.scene = scene;
+            this.obj = scene.physics.add.sprite(x, y, "circle").setScale(SPRITE_SCALE);
+            this.lastDash = -999;
             this.oldPosition = {
                 x: x,
                 y: y,
                 rotation: 0
             };
+        }
+        
+        attemptDash() {
+            const currentTime = this.game.getTime();
+            if(!this.canDash(currentTime)) {
+                return;
+            }
+            
+            const currentVelocity = this.obj.body.velocity;
+            if(currentVelocity.x == 0 && currentVelocity.y == 0) {
+                // Not moving, no dash
+                return;
+            }
+            
+            const velocityDir = Math.atan2(currentVelocity.y, currentVelocity.x);
+            const dashX = DASH_VELOCITY * Math.cos(velocityDir);
+            const dashY = DASH_VELOCITY * Math.sin(velocityDir);
+            this.obj.setVelocity(dashX, dashY);
+            this.lastDash = currentTime;
+        }
+        
+        isDashing(currentTime) {
+            if(currentTime == null) {
+                currentTime = this.game.getTime();
+            }
+            return currentTime - this.lastDash < MAX_DASH_TIME;
+        }
+        
+        canDash(currentTime) {
+            if(currentTime == null) {
+                currentTime = this.game.getTime();
+            }
+            return currentTime - this.lastDash >= MAX_DASH_TIME + MAX_DASH_COOLDOWN;
         }
 
         stopMoving() {
@@ -49,10 +91,15 @@ const MyPlayer = (() => {
         }
 
         setVelocityDirection(dirX, dirY) {
-            let angle = Math.atan2(dirY, dirX);
-            let velocityX = MAX_VELOCITY * Math.cos(angle);
-            let velocityY = MAX_VELOCITY * Math.sin(angle);
+            const angle = Math.atan2(dirY, dirX);
+            const velocityX = MAX_VELOCITY * Math.cos(angle);
+            const velocityY = MAX_VELOCITY * Math.sin(angle);
             this.obj.setVelocity(velocityX, velocityY);
+        }
+        
+        // "teleport"
+        setPosition(x, y) {
+            this.obj.setPosition(x, y);
         }
 
         getX() {
@@ -62,13 +109,21 @@ const MyPlayer = (() => {
         getY() {
             return this.obj.y;
         }
+        
+        getSpriteScale() {
+            return SPRITE_SCALE;
+        }
     };
 })();
+
 const Game = (() => {
+    const CAMERA_SPEED = 0.2;
+    const WALL_BOUNDS_SIZE = 10;
     const config = {
         type: Phaser.AUTO,
         width: 800,
         height: 600,
+        backgroundColor: 0x000000,
         physics: {
             default: "arcade",
             arcade: {
@@ -83,9 +138,11 @@ const Game = (() => {
     };
 
     /* SETUP */
-    const game = new Phaser.Game(config);
+    let game = new Phaser.Game(config);
+    let scene;
     let inputHandler;
     let socket;
+    let instantCameraFrame = false;
 
     function preload() {
         this.load.image("floor", "assets/floor.png");
@@ -95,65 +152,99 @@ const Game = (() => {
     }
 
     function create() {
+        scene = this;
+        
         // Setup socket
-        setupSocket(this);
+        setupSocket();
 
         // Setup background
-        let background = this.add.image(0, 0, "floor")
+        let background = scene.add.image(0, 0, "floor")
             .setOrigin(0, 0); // Center image
-        this.xLimit = background.displayWidth;
-        this.yLimit = background.displayHeight;
+        scene.xLimit = background.displayWidth;
+        scene.yLimit = background.displayHeight;
 
         // Setup player
-        this.player = new MyPlayer(this, 300, 300);
+        scene.player = new MyPlayer(game, scene, 0, 0);
 
         // Setup camera
-        const CAMERA_SPEED = 0.2;
-        this.cameras.main
-            .setBounds(0, 0, this.xLimit, this.yLimit)
-            .startFollow(this.player.obj)
+        scene.cameras.main
+            .setBounds(0, 0, scene.xLimit, scene.yLimit)
+            .startFollow(scene.player.obj)
             .setRoundPixels(false) // default false
             .setLerp(CAMERA_SPEED, CAMERA_SPEED);
+        scene.cameras.main.fadeIn(300, 0, 0, 0);
 
         // Setup obstacles
-        this.obstacles = this.physics.add.staticGroup(); //create group for obstacles
-        this.obstacles.create(800, 600, "obstacle");
-        this.obstacles.create(900, 800, "obstacle");
+        scene.obstacles = scene.physics.add.staticGroup(); //create group for obstacles
+        scene.obstacles.create(800, 600, "obstacle");
+        scene.obstacles.create(900, 800, "obstacle");
 
-        this.physics.add.collider(this.player.obj, this.obstacles); //collision detection between player and obstacles
+        scene.physics.add.collider(scene.player.obj, scene.obstacles); //collision detection between player and obstacles
+        
+        setupBounds();
 
         // Setup input
-        inputHandler = new Input(this);
+        inputHandler = new Input(scene);
     }
     
-    function setupSocket(gameObj) {
+    function setupBounds() {
+        const HALF_WALL_WIDTH = WALL_BOUNDS_SIZE / 2.0;
+        scene.wallBounds = scene.physics.add.staticGroup();
+        scene.wallBounds.create(-HALF_WALL_WIDTH, scene.yLimit / 2.0)
+            .setAlpha(0)
+            .body.setSize(WALL_BOUNDS_SIZE, scene.yLimit);
+        scene.wallBounds.create(scene.xLimit + HALF_WALL_WIDTH, scene.yLimit / 2.0)
+            .setAlpha(0)
+            .body.setSize(WALL_BOUNDS_SIZE, scene.yLimit);
+        scene.wallBounds.create(scene.xLimit / 2.0, -HALF_WALL_WIDTH)
+            .setAlpha(0)
+            .body.setSize(scene.xLimit, WALL_BOUNDS_SIZE)
+        scene.wallBounds.create(scene.xLimit / 2.0, scene.yLimit + HALF_WALL_WIDTH)
+            .setAlpha(0)
+            .body.setSize(scene.xLimit, WALL_BOUNDS_SIZE)
+        scene.physics.add.collider(scene.player.obj, scene.wallBounds);
+    }
+    
+    function setupSocket() {
         socket = io();
-        gameObj.otherPlayers = gameObj.physics.add.group();
+        scene.otherPlayers = scene.physics.add.group();
 
         socket.on("currentPlayers", players => {
             for(id in players) {
                 const otherPlayer = players[id];
-                if(otherPlayer.playerId !== socket.id) {
-                    addOtherPlayer(gameObj, otherPlayer);
+                if(otherPlayer.playerId === socket.id) {
+                    scene.player.setPosition(otherPlayer.x, otherPlayer.y);
+                    teleportCameraNextFrame();
+                } else {
+                    addOtherPlayer(otherPlayer);
                 }
             }
         });
         
         socket.on("playerConnect", playerInfo => {
             console.log("playerConnect received");
-            addOtherPlayer(gameObj, playerInfo);
+            addOtherPlayer(playerInfo);
         });
         
+        const FADE_OUT_TIME = 400;
         socket.on("playerDisconnect", playerId => {
-            gameObj.otherPlayers.getChildren().forEach(otherPlayer => {
+            scene.otherPlayers.getChildren().forEach(otherPlayer => {
                 if(playerId === otherPlayer.playerId) {
-                    otherPlayer.destroy();
+                    scene.tweens.add({
+                        targets: otherPlayer,
+                        alpha: 0,
+                        duration: FADE_OUT_TIME,
+                        onComplete: () => {
+                            // Can also set onCompleteScope if needed
+                            otherPlayer.destroy();
+                        }
+                    });
                 }
             });
         });
 
         socket.on("playerMoved", playerInfo => {
-            gameObj.otherPlayers.getChildren().forEach(otherPlayer => {
+            scene.otherPlayers.getChildren().forEach(otherPlayer => {
                 if(playerInfo.playerId === otherPlayer.playerId) {
                     otherPlayer.setPosition(playerInfo.x, playerInfo.y);
                     otherPlayer.setRotation(playerInfo.rotation);
@@ -162,36 +253,39 @@ const Game = (() => {
         });
     }
 
-    function addOtherPlayer(gameObj, playerInfo) {
-        const otherPlayer = gameObj.add.sprite(playerInfo.x, playerInfo.y, "other")
-            .setScale(0.5);
+    function addOtherPlayer(playerInfo) {
+        const NAMETAG_OFFSET = -40;
+        const FONT_SIZE = 16;
+        
+        const otherPlayerSprite = scene.add.sprite(0, 0, "other")
+            .setScale(scene.player.getSpriteScale());
+        const otherPlayerNametag = scene.add.text(0, 0, playerInfo.playerId, {
+            fontFamily: 'Arial',
+            color: '#000000',
+            align: 'center'
+        }).setFontSize(FONT_SIZE)
+            .setOrigin(0.5)
+            .setY(NAMETAG_OFFSET)
+        const otherPlayer = scene.add.container(playerInfo.x, playerInfo.y)
+            .setRotation(playerInfo.rotation)
+            .add(otherPlayerSprite)
+            .add(otherPlayerNametag)
+        
         otherPlayer.playerId = playerInfo.playerId;
-        gameObj.otherPlayers.add(otherPlayer);
+        scene.otherPlayers.add(otherPlayer);
     }
 
     /* UPDATE */
     function update() {
-        let dirX = 0;
-        let dirY = 0;
-
-        if(inputHandler.left() && this.player.getX() >= 0) {
-            dirX = -1;
+        if(instantCameraFrame) {
+            instantCameraFrame = false;
+        } else if(cameraIsInstant()) {
+            scene.cameras.main.setLerp(CAMERA_SPEED, CAMERA_SPEED);
         }
-        else if(inputHandler.right() && this.player.getX() <= this.xLimit) {
-            dirX = 1;
-        }
-
-        if(inputHandler.up() && this.player.getY() >= 0) {
-            dirY = -1;
-        }
-        else if(inputHandler.down() && this.player.getY() <= this.yLimit) {
-            dirY = 1;
-        }
-
-        if(dirX != 0 || dirY != 0) {
-            this.player.setVelocityDirection(dirX, dirY);
-        } else {
-            this.player.stopMoving();
+        
+        const self = this;
+        if(!this.player.isDashing()) {
+            handleInput(self);
         }
 
         // emit player movement
@@ -199,11 +293,38 @@ const Game = (() => {
             let newPos = {
                 x: this.player.obj.x,
                 y: this.player.obj.y,
-                rotation: this.rotation
+                rotation: this.player.obj.rotation
             }
             socket.emit("playerMovement", newPos)
-            this.oldPosition = newPos;
+            this.player.oldPosition = newPos;
         }
+    }
+    
+    function handleInput(self) {
+        let dirX = 0;
+        let dirY = 0;
+        
+        if(inputHandler.left()) {
+            dirX = -1;
+        } else if(inputHandler.right()) {
+            dirX = 1;
+        }
+
+        if(inputHandler.up()) {
+            dirY = -1;
+        } else if(inputHandler.down()) {
+            dirY = 1;
+        }
+
+        if(dirX != 0 || dirY != 0) {
+            self.player.setVelocityDirection(dirX, dirY);
+        } else {
+            self.player.stopMoving();
+        }
+    }
+    
+    function cameraIsInstant() {
+        return scene.cameras.main.lerp.x == 1 && scene.cameras.main.lerp.y == 1;
     }
 
     function playerHasMoved(playerObj, oldPosition) {
@@ -211,6 +332,11 @@ const Game = (() => {
         const y = playerObj.y;
         const rotation = playerObj.rotation;
         return (oldPosition.x !== x) || (oldPosition.y !== y) || (oldPosition.rotation !== rotation);
+    }
+    
+    function teleportCameraNextFrame() {
+        instantCameraFrame = true;
+        scene.cameras.main.setLerp(1, 1);
     }
 
     return {

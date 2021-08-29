@@ -6,7 +6,7 @@ const server = require("http").createServer(app);
 const io = require("socket.io")(server);
 const PORT = 8081;
 
-let players = {};
+const players = {};
 
 app.use(express.static(__dirname + "/public"));
 app.get("/", function (req, res) {
@@ -14,33 +14,33 @@ app.get("/", function (req, res) {
 })
 
 io.on("connection", client => {
-    console.log("A user connected!");
+    console.log("A user connected!", client.id);
+    let x = Math.floor(Math.random() * 700) + 50;
+    let y = Math.floor(Math.random() * 500) + 50;
     players[client.id] = {
         rotation: 0,
-        x: Math.floor(Math.random() * 700) + 50,
-        y: Math.floor(Math.random() * 500) + 50,
+        x: x,
+        y: y,
         playerId: client.id,
     };
-    console.log(players[client.id]);
     client.emit("currentPlayers", players);
     client.broadcast.emit("playerConnect", players[client.id]);
     
     client.on("disconnect", () => {
-        console.log("A user disconnected!")
+        console.log("A user disconnected!", client.id)
         delete players[client.id];
         client.broadcast.emit("playerDisconnect", client.id); // "disconnect" is reserved
     });
     
-    // when a player moves, update the player data
     client.on("playerMovement", movementData => {
         const playerInfo = players[client.id];
         playerInfo.x = movementData.x;
         playerInfo.y = movementData.y;
         playerInfo.rotation = movementData.rotation;
-        // emit a message to all players about the player that moved
         client.broadcast.emit("playerMoved", playerInfo);
     });
-})
+});
+
 server.listen(PORT, function () {
     console.log("Listening on " + server.address().port);
-})
+});
