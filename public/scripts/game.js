@@ -10,7 +10,7 @@ const Game = (() => {
         physics: {
             default: "arcade",
             arcade: {
-                debug: true // Turn this on to see hitboxes
+                debug: false // Turn this on to see hitboxes
             }
         },
         scene: {
@@ -34,6 +34,7 @@ const Game = (() => {
         this.load.image("other", "assets/other.png");
         this.load.image("obstacle", "assets/obstacle.png");
         this.load.audio("woosh", "assets/woosh.mp3");
+        this.load.html("chatinput", "pages/chatinput.html");
     }
 
     function create() {
@@ -132,6 +133,15 @@ const Game = (() => {
 
         // Setup input
         inputHandler = new Input(scene);
+        
+        // Chat
+        /*
+        scene.chatInput = scene.add.dom(300, 300)
+            .createFromCache("chatinput")
+            .setOrigin(0.5);
+        scene.chat = scene.add.text(10, 10, "", { lineSpacing: 15, backgroundColor: "#21313CDD", color: "#26924F", padding: 10, fontStyle: "bold" });
+        scene.chat.setFixedSize(270, 645);
+        */
     }
 
     function setupBounds() {

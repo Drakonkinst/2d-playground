@@ -11,14 +11,17 @@ const ADJECTIVES = [
     "nimble", "keen", "whispering", "beautiful", "glossy", "jagged", "splendid",
     "comfortable", "reflective", "melodic", "misty", "decisive", "flimsy",
     "alleged", "dizzy", "sleepy", "yawning", "feeble", "inquisitive", "murky",
-    "tranquil", "rhetorical", "enchanted", "dazzling", "foamy", "shiny"
+    "tranquil", "rhetorical", "enchanted", "dazzling", "foamy", "shiny", "liberal",
+    "mysterious", "dark", "marvelous", "payable", "short", "tall", "medieval",
+    "visiting"
 ];
 // https://www.randomlists.com/random-animals
 const ANIMALS = [
     "squirrel", "lizard", "cat", "dog", "turtle", "fox", "armadillo", "kangaroo",
     "beetle", "coyote", "mongoose", "newt", "chicken", "cow", "sheep", "bunny",
     "rabbit", "snake", "badger", "kitten", "puppy", "camel", "bear", "fox", "wolf",
-    "crab", "hyena", "anteater", "chipmunk", "eagle"
+    "crab", "hyena", "anteater", "chipmunk", "eagle", "prawn", "salmon", "manatee",
+    "caiman", "bee", "porpoise", "dolphin"
 ];
 
 const players = {};

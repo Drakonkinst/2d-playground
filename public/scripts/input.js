@@ -1,16 +1,16 @@
 const Input = (() => {
     return class Input {
-        constructor(game) {
-            this.game = game;
-            this.primaryInput = game.input.keyboard.createCursorKeys();
-            this.altInput = game.input.keyboard.addKeys({
+        constructor(scene) {
+            this.scene = scene;
+            this.primaryInput = scene.input.keyboard.createCursorKeys();
+            this.altInput = scene.input.keyboard.addKeys({
                 up: 'W',
                 left: 'A',
                 down: 'S',
                 right: 'D'
             });
-            game.input.keyboard.on("keydown-SPACE", function () {
-                game.player.attemptDash();
+            scene.input.keyboard.on("keydown-SPACE", function () {
+                scene.player.attemptDash();
             });
         }
 
