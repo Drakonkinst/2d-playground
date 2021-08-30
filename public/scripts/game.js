@@ -1,6 +1,6 @@
 // https://micropi.wordpress.com/2020/05/02/making-a-top-down-game-in-phaser-3/
 const Game = (() => {
-    const CAMERA_SPEED = 0.2;
+    const CAMERA_SPEED = 1; // 0 to 1
     const WALL_BOUNDS_SIZE = 10;
     const config = {
         type: Phaser.AUTO,
@@ -19,20 +19,35 @@ const Game = (() => {
             update: update
         }
     };
+    const TYPE_TO_SPRITE_INFO = {
+        "obstacle": {
+            "sprite": "obstacle"
+        },
+        "ball": {
+            "sprite": "npc",
+            "group": "balls",
+            "scale": 0.4,
+            "bounce": 0.75,
+            "drag": 75,
+            "radius": 100
+        }
+    };
 
     /* SETUP */
     let game = new Phaser.Game(config);
     let scene;
     let inputHandler;
     let socket;
-    let instantCameraFrame = false;
+    let isCameraAttached = false;
     
-    const otherPlayers = {};
+    const players = {};
+    const npcs = {};
 
     function preload() {
         this.load.image("floor", "assets/floor.png");
         this.load.image("dust", "assets/dust.png");
         this.load.image("circle", "assets/circle.png");
+        this.load.image("npc", "assets/npc.png");
         this.load.image("other", "assets/other.png");
         this.load.image("obstacle", "assets/obstacle.png");
         this.load.audio("woosh", "assets/woosh.mp3");
@@ -55,93 +70,28 @@ const Game = (() => {
         scene.particleManager.dustParticle = this.add.particles("dust");
 
         // Setup player
-        scene.player = new MyPlayer(game, scene, 0, 0);
 
         // Setup camera
-        scene.cameras.main
-            .setBounds(0, 0, scene.xLimit, scene.yLimit)
-            .startFollow(scene.player.obj)
-            .setRoundPixels(false) // default false
-            .setLerp(CAMERA_SPEED, CAMERA_SPEED);
+        scene.cameras.main.setBounds(0, 0, scene.xLimit, scene.yLimit)
         scene.cameras.main.fadeIn(300, 0, 0, 0);
 
-
-        // Setup obstacles
-        scene.obstacles = scene.physics.add.staticGroup(); //create group for obstacles
-        scene.physics.add.collider(scene.player.obj, scene.obstacles); //collision detection between player and obstacles
-
-        /*
-        scene.boxes = scene.physics.add.group({
-            dragX: 500,
-            dragY: 500
-        });
-        scene.boxes.create(100, 300, "circle").setScale(0.7);//.setCircle(10);
-        //scene.boxes.create(200, 300, "circle").setPushable(false);
-        //scene.boxes.create(300, 300, "circle");
-        //scene.boxes.create(400, 300, "circle");
-        scene.physics.add.collider(scene.boxes);
-        scene.physics.add.overlap(scene.boxes, scene.boxes, function (box1, box2) {
-            let deltaX = box2.x - box1.x;
-            let deltaY = box2.y - box1.y;
-            let isHorizontal = Math.abs(deltaX) > Math.abs(deltaY);
-            if(isHorizontal) {
-                if(box1.body.velocity.x < 0 && deltaX < 0
-                    && !box2.body.blocked.left && !box2.body.touching.left) {
-                    box2.body.setVelocityX(box1.body.velocity.x);
-                } else if(box1.body.velocity.x > 0 && deltaX > 0
-                    && !box2.body.blocked.right && !box2.body.touching.right) {
-                    box2.body.setVelocityX(box1.body.velocity.x);
-                }
-            } else {
-                if(box1.body.velocity.y < 0 && deltaY < 0
-                    && !box2.body.blocked.up && !box2.body.touching.up) {
-                    box2.body.setVelocityY(box1.body.velocity.y);
-                } else if(box1.body.velocity.y > 0 && deltaY > 0
-                    && !box2.body.blocked.down && !box2.body.touching.down) {
-                    box2.body.setVelocityY(box1.body.velocity.y);
-                }
-            }
-        });
-        scene.physics.add.overlap(scene.player.obj, scene.boxes, function(player, box) {
-            let deltaX = box.x - player.x;
-            let deltaY = box.y - player.y;
-            let isHorizontal = Math.abs(deltaX) > Math.abs(deltaY);
-            if(isHorizontal) {
-                if(player.body.velocity.x < 0 && deltaX < 0
-                    && !box.body.blocked.left && !box.body.touching.left) {
-                    box.body.setVelocityX(player.body.velocity.x);
-                } else if(player.body.velocity.x > 0 && deltaX > 0
-                    && !box.body.blocked.right && !box.body.touching.right) {
-                    box.body.setVelocityX(player.body.velocity.x);
-                }
-            } else {
-                if(player.body.velocity.y < 0 && deltaY < 0
-                    && !box.body.blocked.up && !box.body.touching.up) {
-                    box.body.setVelocityY(player.body.velocity.y);
-                } else if(player.body.velocity.y > 0 && deltaY > 0
-                    && !box.body.blocked.down && !box.body.touching.down) {
-                    box.body.setVelocityY(player.body.velocity.y);
-                }
-            }
-        });
-        scene.physics.add.collider(scene.obstacles, scene.boxes);*/
-
-
+        // Setup objects
         setupBounds();
-        scene.physics.add.collider(scene.wallBounds, scene.player.obj);
-        //scene.physics.add.collider(scene.wallBounds, scene.boxes);
-
-        // Setup input
-        inputHandler = new Input(scene);
+        //scene.physics.add.collider(scene.wallBounds, scene.player.obj);
         
-        // Chat
-        /*
-        scene.chatInput = scene.add.dom(300, 300)
-            .createFromCache("chatinput")
-            .setOrigin(0.5);
-        scene.chat = scene.add.text(10, 10, "", { lineSpacing: 15, backgroundColor: "#21313CDD", color: "#26924F", padding: 10, fontStyle: "bold" });
-        scene.chat.setFixedSize(270, 645);
-        */
+        scene.staticObjects = scene.physics.add.staticGroup(); //create group for obstacles
+        //scene.physics.add.collider(scene.player.obj, scene.staticObjects); //collision detection between player and obstacles
+
+        scene.dynamicObjects = scene.physics.add.group();
+
+        scene.balls = scene.physics.add.group();
+        //scene.physics.add.collider(scene.player.obj, scene.balls);
+        scene.physics.add.collider(scene.wallBounds, scene.balls);
+        scene.physics.add.collider(scene.staticObjects, scene.balls);
+        scene.physics.add.collider(scene.players, scene.balls);
+
+        // Setup inputs
+        inputHandler = new Input(scene, socket);
     }
 
     function setupBounds() {
@@ -163,38 +113,45 @@ const Game = (() => {
 
     function setupSocket() {
         socket = io();
-        scene.otherPlayers = scene.physics.add.group();
+        scene.players = scene.physics.add.group();
 
-        socket.on("currentWorldState", (players, staticObjects, dynamicObjects) => {
-            loadCurrentPlayers(players);
-            loadStaticObjects(staticObjects);
+        socket.on("currentWorldState", WorldState => {
+            loadCurrentPlayers(WorldState.players);
+            loadStaticObjects(WorldState.staticObjects);
+            loadDynamicObjects(WorldState.dynamicObjects);
         });
 
         socket.on("playerConnect", playerInfo => {
             console.log("playerConnect received");
-            addOtherPlayer(playerInfo);
+            displayPlayer(playerInfo, "other");
         });
 
         socket.on("playerDisconnect", playerId => {
-            for(const otherPlayerModel of Object.values(otherPlayers)) {
-                if(playerId === otherPlayerModel.playerId) {
-                    deleteOtherPlayer(otherPlayerModel);
-                }
-            }
+            destroyPlayer(playerId);
         });
-
-        socket.on("playerMoved", playerInfo => {
-            for(const otherPlayerModel of Object.values(otherPlayers)) {
-                if(playerInfo.playerId === otherPlayerModel.playerId) {
-                    otherPlayerModel.obj.setPosition(playerInfo.x, playerInfo.y);
-                    otherPlayerModel.obj.setRotation(playerInfo.rotation);
-                    if(playerInfo.dashing && !otherPlayerModel.isDashing()) {
-                        otherPlayerModel.startDashing();
-                    } else if(!playerInfo.dashing && otherPlayerModel.isDashing()) {
-                        otherPlayerModel.stopDashing();
-                    }
+        
+        socket.on("playerStateUpdates", playerInfos => {
+            scene.players.getChildren().forEach(player => {
+                const playerInfo = playerInfos[player.playerId];
+                const playerModel = players[player.playerId];
+                const isSelf = socket.id === player.playerId;
+                if(!playerInfo || !playerModel) {
+                    return;
                 }
-            };
+                player.setPosition(playerInfo.x, playerInfo.y);
+
+                if(playerInfo.dashing && !playerModel.isDashing()) {
+                    // Only play sound for self, for now
+                    if(isSelf) {
+                        scene.game.sound.play("woosh", {
+                            volume: 0.3
+                        });
+                    }
+                    playerModel.startDashing();
+                } else if(!playerInfo.dashing && playerModel.isDashing()) {
+                    playerModel.stopDashing();
+                }
+            });
         });
         
         socket.on("staticObjectSpawned", info => {
@@ -204,71 +161,135 @@ const Game = (() => {
         socket.on("staticObjectDespawned", id => {
             deleteStaticObject(id);
         });
+        
+        socket.on("dynamicObjectSpawned", info => {
+            addDynamicObject(info);    
+        });
+        
+        socket.on("dynamicObjectDespawned", id => {
+            deleteDynamicObject(id);
+        });
+        
+        socket.on("update", () => {
+            console.log("Update!");
+        });
+        
+        socket.on("npcSpawned", npcInfo => {
+            // TODO might be better to use an inbuilt group
+            npcs[npcInfo.id] = scene.add.sprite(npcInfo.x, npcInfo.y, "npc").setScale(0.5);
+        });
+        
+        socket.on("npcMoved", movementData => {
+            if(!npcs.hasOwnProperty(movementData.id)) {
+                npcs[movementData.id] = scene.add.sprite(movementData.x, movementData.y, "npc")
+                    .setScale(0.5);
+            } else {
+                npcs[movementData.id].setPosition(movementData.x, movementData.y);
+            }
+        });
     }
     
     function loadCurrentPlayers(players) {
         for(id in players) {
-            const otherPlayer = players[id];
-            if(otherPlayer.playerId === socket.id) {
-                scene.player.setPosition(otherPlayer.x, otherPlayer.y);
-                teleportCameraNextFrame();
+            const player = players[id];
+            if(player.playerId === socket.id) {
+                displayPlayer(player, "circle");
             } else {
-                addOtherPlayer(otherPlayer);
+                displayPlayer(player, "other");
             }
         }
     }
-
-    function addOtherPlayer(playerInfo) {
-        const playerModel = new PlayerModel(scene, playerInfo);
-        otherPlayers[playerInfo.playerId] = playerModel;
+    
+    function displayPlayer(playerInfo, sprite) {
+        const playerModel = new PlayerModel(scene, playerInfo, sprite)
+        players[playerInfo.playerId] = playerModel;
     }
     
-    function deleteOtherPlayer(playerModel) {
-        playerModel.onDestroy();
-        delete otherPlayers[playerModel.playerId];
+    function destroyPlayer(playerId) {
+        scene.players.getChildren().forEach(player => {
+            if(playerId === player.playerId) {
+                const modelInfo = player.modelInfo;
+                modelInfo.onDestroy();
+                delete players[player.playerId];
+            }
+        });
     }
     
     function loadStaticObjects(staticObjects) {
-        for(const obstacleInfo of Object.values(staticObjects)) {
-            addStaticObject(obstacleInfo);
+        for(const staticObject of Object.values(staticObjects)) {
+            addStaticObject(staticObject);
         }
     }
     
     function addStaticObject(info) {
-        // TODO may have to wrap around this at some point like player for additional behavior
-        const staticObject = scene.obstacles.create(info.x, info.y, info.sprite);
+        const spriteInfo = TYPE_TO_SPRITE_INFO[info.type];
+        const staticObject = scene.staticObjects.create(info.x, info.y, spriteInfo.sprite);
+        applyProperties(staticObject, spriteInfo);
         staticObject.id = info.id;
     }
     
     function deleteStaticObject(id) {
-        scene.obstacles.getChildren().forEach(obstacle => {
-            if(obstacle.id == id) {
-                obstacle.destroy();
+        scene.staticObjects.getChildren().forEach(obj => {
+            if(obj.id == id) {
+                obj.destroy();
             }
         });
+    }
+    
+    function loadDynamicObjects(dynamicObjects) {
+        for(const dynamicObject of Object.values(dynamicObjects)) {
+            addDynamicObject(dynamicObject);
+        }
+    }
+    
+    function addDynamicObject(info) {
+        const spriteInfo = TYPE_TO_SPRITE_INFO[info.type];
+        const dynamicObject = scene.dynamicObjects.create(info.x, info.y, spriteInfo.sprite);
+        applyProperties(dynamicObject, spriteInfo);
+        dynamicObject.id = info.id;    
+    }
+    
+    function deleteDynamicObject(id) {
+        scene.dynamicObjects.getChildren().forEach(obj => {
+            if(obj.id == id) {
+                obj.destroy();
+            }
+        });
+    }
+    
+    function applyProperties(obj, spriteInfo) {
+        if(spriteInfo.scale) {
+            obj.setScale(spriteInfo.scale);
+        }
+        if(spriteInfo.group) {
+            scene[spriteInfo.group].add(obj);
+        }
+        if(spriteInfo.bounce) {
+            obj.body.setBounce(spriteInfo.bounce, spriteInfo.bounce);
+        }
+        if(spriteInfo.drag) {
+            obj.body.setDrag(spriteInfo.drag, spriteInfo.drag);
+            console.log(obj.body.drag);
+        }
+        if(spriteInfo.radius) {
+            obj.body.setCircle(obj.body.width / 2.0);
+        }
     }
 
     /* UPDATE */
     function update() {
-        if(instantCameraFrame) {
-            instantCameraFrame = false;
-        } else if(cameraIsInstant()) {
-            scene.cameras.main.setLerp(CAMERA_SPEED, CAMERA_SPEED);
+        // If camera is not attached, look for player to attach
+        if(!isCameraAttached && players.hasOwnProperty(socket.id)) {
+            const selfPlayer = players[socket.id].obj;
+            scene.cameras.main.startFollow(selfPlayer, false, CAMERA_SPEED, CAMERA_SPEED);
+            isCameraAttached = true;
         }
-
-        this.player.onUpdate();
-    }
-
-    function cameraIsInstant() {
-        return scene.cameras.main.lerp.x == 1 && scene.cameras.main.lerp.y == 1;
-    }
-
-    function teleportCameraNextFrame() {
-        instantCameraFrame = true;
-        scene.cameras.main.setLerp(1, 1);
+        
+        inputHandler.handleInput();
     }
 
     return {
+        // TODO: Should probably move this now it's only used in PlayerModel
         createDustParticleEmitter() {
             const emitter = scene.particleManager.dustParticle.createEmitter({
                 speed: 80,
@@ -308,7 +329,7 @@ const Game = (() => {
         },
         
         getOtherPlayers() {
-            return otherPlayers;
+            return players;
         }
     };
 })();

@@ -8,22 +8,18 @@ const MyPlayer = (() => {
     function playerHasMoved(playerObj, oldPosition) {
         const x = playerObj.x;
         const y = playerObj.y;
-        const rotation = playerObj.rotation;
-        return (oldPosition.x !== x) || (oldPosition.y !== y) || (oldPosition.rotation !== rotation);
+        return (oldPosition.x !== x) || (oldPosition.y !== y);
     }
     return class MyPlayer {
         constructor(game, scene, x, y) {
             this.game = game;
             this.scene = scene;
-            this.obj = scene.physics.add.sprite(x, y, "circle").setScale(SPRITE_SCALE);
             this.lastDash = -999;
             this.oldPosition = {
                 x: x,
-                y: y,
-                rotation: 0
+                y: y
             };
             
-            this.dashEmitter = Game.createDustParticleEmitter().startFollow(this.obj);
         }
 
         onUpdate() {
@@ -35,7 +31,7 @@ const MyPlayer = (() => {
             }
 
             if(!this.isDashing()) {
-                this.handleInput();
+                //this.handleInput();
             }
 
             // emit player movement
@@ -48,7 +44,6 @@ const MyPlayer = (() => {
             let newPos = {
                 x: this.obj.x,
                 y: this.obj.y,
-                rotation: this.obj.rotation,
                 dashing: !this.canDash()
             }
             Game.getSocket().emit("playerMovement", newPos)
