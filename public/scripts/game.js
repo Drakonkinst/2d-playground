@@ -1,7 +1,6 @@
 // https://micropi.wordpress.com/2020/05/02/making-a-top-down-game-in-phaser-3/
 const Game = (() => {
     const CAMERA_SPEED = 1; // 0 to 1
-    const WALL_BOUNDS_SIZE = 10;
     const config = {
         type: Phaser.AUTO,
         width: 800,
@@ -41,7 +40,9 @@ const Game = (() => {
     let isCameraAttached = false;
     
     const players = {};
-    const npcs = {};
+    const staticObjects = {};
+    const dynamicObjects = {};
+    //const npcs = {};
 
     function preload() {
         this.load.image("floor", "assets/floor.png");
@@ -76,39 +77,11 @@ const Game = (() => {
         scene.cameras.main.fadeIn(300, 0, 0, 0);
 
         // Setup objects
-        setupBounds();
-        //scene.physics.add.collider(scene.wallBounds, scene.player.obj);
-        
-        scene.staticObjects = scene.physics.add.staticGroup(); //create group for obstacles
-        //scene.physics.add.collider(scene.player.obj, scene.staticObjects); //collision detection between player and obstacles
-
+        scene.staticObjects = scene.physics.add.staticGroup();
         scene.dynamicObjects = scene.physics.add.group();
-
-        scene.balls = scene.physics.add.group();
-        //scene.physics.add.collider(scene.player.obj, scene.balls);
-        scene.physics.add.collider(scene.wallBounds, scene.balls);
-        scene.physics.add.collider(scene.staticObjects, scene.balls);
-        scene.physics.add.collider(scene.players, scene.balls);
 
         // Setup inputs
         inputHandler = new Input(scene, socket);
-    }
-
-    function setupBounds() {
-        const HALF_WALL_WIDTH = WALL_BOUNDS_SIZE / 2.0;
-        scene.wallBounds = scene.physics.add.staticGroup();
-        scene.wallBounds.create(-HALF_WALL_WIDTH, scene.yLimit / 2.0)
-            .setAlpha(0)
-            .body.setSize(WALL_BOUNDS_SIZE, scene.yLimit);
-        scene.wallBounds.create(scene.xLimit + HALF_WALL_WIDTH, scene.yLimit / 2.0)
-            .setAlpha(0)
-            .body.setSize(WALL_BOUNDS_SIZE, scene.yLimit);
-        scene.wallBounds.create(scene.xLimit / 2.0, -HALF_WALL_WIDTH)
-            .setAlpha(0)
-            .body.setSize(scene.xLimit, WALL_BOUNDS_SIZE)
-        scene.wallBounds.create(scene.xLimit / 2.0, scene.yLimit + HALF_WALL_WIDTH)
-            .setAlpha(0)
-            .body.setSize(scene.xLimit, WALL_BOUNDS_SIZE)
     }
 
     function setupSocket() {
@@ -117,8 +90,8 @@ const Game = (() => {
 
         socket.on("currentWorldState", WorldState => {
             loadCurrentPlayers(WorldState.players);
-            loadStaticObjects(WorldState.staticObjects);
-            loadDynamicObjects(WorldState.dynamicObjects);
+            //loadStaticObjects(WorldState.staticObjects);
+            loadCurrentDynamicObjects(WorldState.dynamicObjects);
         });
 
         socket.on("playerConnect", playerInfo => {
@@ -151,6 +124,16 @@ const Game = (() => {
                 } else if(!playerInfo.dashing && playerModel.isDashing()) {
                     playerModel.stopDashing();
                 }
+            });
+        });
+        
+        socket.on("dynamicObjectUpdates", dynamicObjectsInfo => {
+            scene.dynamicObjects.getChildren().forEach(dynamicObject => {
+                const dynamicObjectInfo = dynamicObjectsInfo[dynamicObject.id];
+                if(!dynamicObjectInfo) {
+                    return;
+                }
+                dynamicObject.setPosition(dynamicObjectInfo.x, dynamicObjectInfo.y);
             });
         });
         
@@ -215,42 +198,49 @@ const Game = (() => {
         });
     }
     
-    function loadStaticObjects(staticObjects) {
-        for(const staticObject of Object.values(staticObjects)) {
-            addStaticObject(staticObject);
+    function loadCurrentDynamicObjects(dynamicObjects) {
+        for(id in dynamicObjects) {
+            const objInfo = dynamicObjects[id];
+            displayDynamicObject(objInfo);
         }
     }
     
-    function addStaticObject(info) {
-        const spriteInfo = TYPE_TO_SPRITE_INFO[info.type];
-        const staticObject = scene.staticObjects.create(info.x, info.y, spriteInfo.sprite);
-        applyProperties(staticObject, spriteInfo);
-        staticObject.id = info.id;
+    function displayDynamicObject(objInfo) {
+        const objModel = scene.dynamicObjects.create(objInfo.x, objInfo.y, objInfo.sprite)
+            .setOrigin(0.5);
+        if(objInfo.scale) {
+            objModel.setScale(objInfo.scale);
+        }
+        objModel.id = objInfo.id;
+        //const spriteInfo = TYPE_TO_SPRITE_INFO[info.type];
+        //const dynamicObject = scene.dynamicObjects.create(info.x, info.y, spriteInfo.sprite);
+        //applyProperties(dynamicObject, spriteInfo);
+        //dynamicObject.id = info.id;    
     }
     
-    function deleteStaticObject(id) {
-        scene.staticObjects.getChildren().forEach(obj => {
+    function deleteDynamicObject(id) {
+        scene.dynamicObjects.getChildren().forEach(obj => {
             if(obj.id == id) {
                 obj.destroy();
             }
         });
     }
     
-    function loadDynamicObjects(dynamicObjects) {
-        for(const dynamicObject of Object.values(dynamicObjects)) {
-            addDynamicObject(dynamicObject);
+    function loadStaticObjects(staticObjects) {
+        for(const staticObject of Object.values(staticObjects)) {
+            addStaticObject(staticObject);
         }
     }
-    
-    function addDynamicObject(info) {
+
+    function addStaticObject(info) {
         const spriteInfo = TYPE_TO_SPRITE_INFO[info.type];
-        const dynamicObject = scene.dynamicObjects.create(info.x, info.y, spriteInfo.sprite);
-        applyProperties(dynamicObject, spriteInfo);
-        dynamicObject.id = info.id;    
+        const staticObject = scene.staticObjects.create(info.x, info.y, spriteInfo.sprite);
+        applyProperties(staticObject, spriteInfo);
+        staticObject.id = info.id;
     }
-    
-    function deleteDynamicObject(id) {
-        scene.dynamicObjects.getChildren().forEach(obj => {
+
+    function deleteStaticObject(id) {
+        scene.staticObjects.getChildren().forEach(obj => {
             if(obj.id == id) {
                 obj.destroy();
             }
@@ -269,7 +259,6 @@ const Game = (() => {
         }
         if(spriteInfo.drag) {
             obj.body.setDrag(spriteInfo.drag, spriteInfo.drag);
-            console.log(obj.body.drag);
         }
         if(spriteInfo.radius) {
             obj.body.setCircle(obj.body.width / 2.0);

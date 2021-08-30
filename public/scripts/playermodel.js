@@ -16,6 +16,7 @@ const PlayerModel = (() => {
                 fontStyle: "bold",
                 align: 'center'
             }).setFontSize(FONT_SIZE)
+                .setWordWrapWidth(null)
                 .setOrigin(0.5)
                 .setY(NAMETAG_OFFSET);
             this.dashEmitter = Game.createDustParticleEmitter();

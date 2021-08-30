@@ -1,5 +1,5 @@
 // https://gamedevacademy.org/create-a-basic-multiplayer-game-in-phaser-3-with-socket-io-part-1/
-const { Socket } = require("dgram");
+// https://phasertutorials.com/creating-a-simple-multiplayer-game-in-phaser-3-with-an-authoritative-server-part-3/
 const express = require("express")
 const app = express();
 const server = require("http").createServer(app);
@@ -11,8 +11,6 @@ const parser = new DatauriParser();
 const jsdom = require('jsdom');
 const { JSDOM } = jsdom;
 
-const NPC = require("./server/scripts/npc").NPC;
-
 const PORT = 8081;
 
 app.use(express.static(__dirname + "/public"));
@@ -20,29 +18,33 @@ app.get("/", function (req, res) {
     res.sendFile(__dirname + "/index.html");
 });
 
-const UPDATE_DELAY = 50; // ms
-
-const WorldState = {
-    players: {},
-    staticObjects: {},
-    dynamicObjects: {}
-}
-const dynamicObjectInfo = {
-
-}
-
-let updateInterval;
-
-function choice(arr) {
-    return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function generateUUID() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
+function setupAuthoritativePhaser() {
+    JSDOM.fromFile(path.join(__dirname, 'server/index.html'), {
+        // To run the scripts in the html file
+        runScripts: "dangerously",
+        // Also load supported external resources
+        resources: "usable",
+        // So requestAnimatinFrame events fire
+        pretendToBeVisual: true
+    }).then((dom) => {
+        dom.window.io = io;
+        dom.window.URL.createObjectURL = (blob) => {
+            if(blob) {
+                return parser.format(blob.type, blob[Object.getOwnPropertySymbols(blob)[0]]._buffer).content;
+            }
+        };
+        dom.window.URL.revokeObjectURL = () => {};
+        dom.window.gameLoaded = () => {
+            server.listen(PORT, function () {
+                console.log(`Listening on ${server.address().port}!`);
+            });
+        };
+    }).catch((error) => {
+        console.log(error.message);
     });
 }
+setupAuthoritativePhaser();
+
 /*
 function addStaticObject(x, y, type) {
     const info = {
@@ -101,13 +103,13 @@ function generateDynamicObjectInfo(info) {
         onUpdate: function() {},
         onDestroy: function() {}
     }
-    
+
     if(info.type == "ball") {
         dynamicInfo.onUpdate = function() {
             //console.log("Updating!");
         }
     }
-    
+
     return dynamicInfo;
 }
 
@@ -132,13 +134,13 @@ io.on("connection", client => {
     client.emit("currentWorldState", WorldState);
     client.broadcast.emit("playerConnect", playerInfo);
     console.log("A user connected!", client.id, "(" + name + ")");
-    
+
     client.on("disconnect", () => {
         console.log("A user disconnected!", client.id)
         delete WorldState.players[client.id];
         client.broadcast.emit("playerDisconnect", client.id); // "disconnect" is reserved
     });
-    
+
     client.on("playerMovement", movementData => {
         const playerInfo = WorldState.players[client.id];
         playerInfo.x = movementData.x;
@@ -146,53 +148,21 @@ io.on("connection", client => {
         playerInfo.dashing = movementData.dashing;
         client.broadcast.emit("playerMoved", client.id, movementData);
     });
-    
+
     client.on("spawnStaticObject", info => {
         addStaticObject(info.x, info.y, info.type);
     });
-    
+
     client.on("despawnStaticObject", id => {
         deleteStaticObject(id);
     });
-    
+
     client.on("spawnDynamicObject", info => {
         addDynamicObject(info.x, info.y, info.type);
     });
-    
+
     client.on("despawnDynamicObject", id => {
         deleteDynamicObject(id);
     });
-    
-    if(updateInterval) {
-        clearInterval(updateInterval);
-    }
-    updateInterval = setInterval(() => onUpdate(), UPDATE_DELAY);
 });
 */
-
-function setupAuthoritativePhaser() {
-    JSDOM.fromFile(path.join(__dirname, 'server/index.html'), {
-        // To run the scripts in the html file
-        runScripts: "dangerously",
-        // Also load supported external resources
-        resources: "usable",
-        // So requestAnimatinFrame events fire
-        pretendToBeVisual: true
-    }).then((dom) => {
-        dom.window.io = io;
-        dom.window.URL.createObjectURL = (blob) => {
-            if(blob) {
-                return parser.format(blob.type, blob[Object.getOwnPropertySymbols(blob)[0]]._buffer).content;
-            }
-        };
-        dom.window.URL.revokeObjectURL = () => {};
-        dom.window.gameLoaded = () => {
-            server.listen(8081, function () {
-                console.log(`Listening on ${server.address().port}!`);
-            });
-        };
-    }).catch((error) => {
-        console.log(error.message);
-    });
-}
-setupAuthoritativePhaser();
