@@ -1,11 +1,13 @@
 // https://micropi.wordpress.com/2020/05/02/making-a-top-down-game-in-phaser-3/
 const Game = (() => {
     const CAMERA_SPEED = 1; // 0 to 1
+    const MAP_SCALE = 8; // Must match server
     const config = {
         type: Phaser.AUTO,
         width: 800,
         height: 600,
         backgroundColor: 0x000000,
+        pixelArt: true,
         physics: {
             default: "arcade",
             arcade: {
@@ -18,19 +20,6 @@ const Game = (() => {
             update: update
         }
     };
-    const TYPE_TO_SPRITE_INFO = {
-        "obstacle": {
-            "sprite": "obstacle"
-        },
-        "ball": {
-            "sprite": "npc",
-            "group": "balls",
-            "scale": 0.4,
-            "bounce": 0.75,
-            "drag": 75,
-            "radius": 100
-        }
-    };
 
     /* SETUP */
     let game = new Phaser.Game(config);
@@ -39,18 +28,17 @@ const Game = (() => {
     let socket;
     let isCameraAttached = false;
     
-    const players = {};
-    const staticObjects = {};
-    const dynamicObjects = {};
+    const playerModels = {};
     //const npcs = {};
 
     function preload() {
-        this.load.image("floor", "assets/floor.png");
+        this.load.image("map", "assets/map.png");
         this.load.image("dust", "assets/dust.png");
         this.load.image("circle", "assets/circle.png");
         this.load.image("npc", "assets/npc.png");
         this.load.image("other", "assets/other.png");
         this.load.image("obstacle", "assets/obstacle.png");
+        this.load.image("fence", "assets/fence.png");
         this.load.audio("woosh", "assets/woosh.mp3");
         this.load.html("chatinput", "pages/chatinput.html");
     }
@@ -62,10 +50,11 @@ const Game = (() => {
         setupSocket();
 
         // Setup background
-        let background = scene.add.image(0, 0, "floor")
+        let background = scene.add.image(0, 0, "map")
+            .setScale(MAP_SCALE)
             .setOrigin(0, 0); // Center image
-        scene.xLimit = background.displayWidth;
-        scene.yLimit = background.displayHeight;
+        const xLimit = background.displayWidth;
+        const yLimit = background.displayHeight;
 
         scene.particleManager = {};
         scene.particleManager.dustParticle = this.add.particles("dust");
@@ -73,7 +62,7 @@ const Game = (() => {
         // Setup player
 
         // Setup camera
-        scene.cameras.main.setBounds(0, 0, scene.xLimit, scene.yLimit)
+        scene.cameras.main.setBounds(0, 0, xLimit, yLimit);
         scene.cameras.main.fadeIn(300, 0, 0, 0);
 
         // Setup objects
@@ -90,7 +79,7 @@ const Game = (() => {
 
         socket.on("currentWorldState", WorldState => {
             loadCurrentPlayers(WorldState.players);
-            //loadStaticObjects(WorldState.staticObjects);
+            loadCurrentStaticObjects(WorldState.staticObjects);
             loadCurrentDynamicObjects(WorldState.dynamicObjects);
         });
 
@@ -106,9 +95,10 @@ const Game = (() => {
         socket.on("playerStateUpdates", playerInfos => {
             scene.players.getChildren().forEach(player => {
                 const playerInfo = playerInfos[player.playerId];
-                const playerModel = players[player.playerId];
+                const playerModel = playerModels[player.playerId];
                 const isSelf = socket.id === player.playerId;
                 if(!playerInfo || !playerModel) {
+                    console.log("Warning: Player " + player.playerId + " info not found");
                     return;
                 }
                 player.setPosition(playerInfo.x, playerInfo.y);
@@ -131,6 +121,7 @@ const Game = (() => {
             scene.dynamicObjects.getChildren().forEach(dynamicObject => {
                 const dynamicObjectInfo = dynamicObjectsInfo[dynamicObject.id];
                 if(!dynamicObjectInfo) {
+                    console.log("Warning: Dynamic object " + dynamicObject.id + " info not found");
                     return;
                 }
                 dynamicObject.setPosition(dynamicObjectInfo.x, dynamicObjectInfo.y);
@@ -138,37 +129,23 @@ const Game = (() => {
         });
         
         socket.on("staticObjectSpawned", info => {
-            addStaticObject(info);
+            displayStaticObject(info);
         });
         
-        socket.on("staticObjectDespawned", id => {
+        socket.on("staticObjectDeleted", id => {
             deleteStaticObject(id);
         });
         
         socket.on("dynamicObjectSpawned", info => {
-            addDynamicObject(info);    
+            displayDynamicObject(info);   
         });
         
-        socket.on("dynamicObjectDespawned", id => {
+        socket.on("dynamicObjectDeleted", id => {
             deleteDynamicObject(id);
         });
         
         socket.on("update", () => {
             console.log("Update!");
-        });
-        
-        socket.on("npcSpawned", npcInfo => {
-            // TODO might be better to use an inbuilt group
-            npcs[npcInfo.id] = scene.add.sprite(npcInfo.x, npcInfo.y, "npc").setScale(0.5);
-        });
-        
-        socket.on("npcMoved", movementData => {
-            if(!npcs.hasOwnProperty(movementData.id)) {
-                npcs[movementData.id] = scene.add.sprite(movementData.x, movementData.y, "npc")
-                    .setScale(0.5);
-            } else {
-                npcs[movementData.id].setPosition(movementData.x, movementData.y);
-            }
         });
     }
     
@@ -183,9 +160,25 @@ const Game = (() => {
         }
     }
     
+    function loadCurrentDynamicObjects(dynamicObjects) {
+        for(id in dynamicObjects) {
+            const objInfo = dynamicObjects[id];
+            displayDynamicObject(objInfo);
+        }
+    }
+
+    function loadCurrentStaticObjects(staticObjects) {
+        console.log(staticObjects);
+        for(id in staticObjects) {
+            const objInfo = staticObjects[id];
+            displayStaticObject(objInfo);
+        }
+    }
+    
     function displayPlayer(playerInfo, sprite) {
         const playerModel = new PlayerModel(scene, playerInfo, sprite)
-        players[playerInfo.playerId] = playerModel;
+        playerModels[playerInfo.playerId] = playerModel;
+        console.log("Registered player " + playerInfo.playerId);
     }
     
     function destroyPlayer(playerId) {
@@ -193,83 +186,59 @@ const Game = (() => {
             if(playerId === player.playerId) {
                 const modelInfo = player.modelInfo;
                 modelInfo.onDestroy();
-                delete players[player.playerId];
+                delete playerModels[player.playerId];
             }
         });
-    }
-    
-    function loadCurrentDynamicObjects(dynamicObjects) {
-        for(id in dynamicObjects) {
-            const objInfo = dynamicObjects[id];
-            displayDynamicObject(objInfo);
-        }
+        console.log("Deleted player " + playerId);
     }
     
     function displayDynamicObject(objInfo) {
         const objModel = scene.dynamicObjects.create(objInfo.x, objInfo.y, objInfo.sprite)
             .setOrigin(0.5);
-        if(objInfo.scale) {
-            objModel.setScale(objInfo.scale);
-        }
+        applyDisplayProperties(objInfo, objModel);
         objModel.id = objInfo.id;
-        //const spriteInfo = TYPE_TO_SPRITE_INFO[info.type];
-        //const dynamicObject = scene.dynamicObjects.create(info.x, info.y, spriteInfo.sprite);
-        //applyProperties(dynamicObject, spriteInfo);
-        //dynamicObject.id = info.id;    
+        console.log("Registered dynamic object " + objInfo.id);
     }
     
-    function deleteDynamicObject(id) {
+    function deleteDynamicObject(objId) {
         scene.dynamicObjects.getChildren().forEach(obj => {
-            if(obj.id == id) {
+            if(obj.id == objId) {
                 obj.destroy();
             }
         });
-    }
-    
-    function loadStaticObjects(staticObjects) {
-        for(const staticObject of Object.values(staticObjects)) {
-            addStaticObject(staticObject);
-        }
+        console.log("Deleted dynamic object " + objId);
     }
 
-    function addStaticObject(info) {
-        const spriteInfo = TYPE_TO_SPRITE_INFO[info.type];
-        const staticObject = scene.staticObjects.create(info.x, info.y, spriteInfo.sprite);
-        applyProperties(staticObject, spriteInfo);
-        staticObject.id = info.id;
+    function displayStaticObject(objInfo) {
+        const objModel = scene.staticObjects.create(objInfo.x, objInfo.y, objInfo.sprite)
+            .setOrigin(0.5);
+        applyDisplayProperties(objInfo, objModel);
+        objModel.id = objInfo.id;
+        console.log("Registered static object " + objInfo.id);
     }
 
-    function deleteStaticObject(id) {
+    function deleteStaticObject(objId) {
         scene.staticObjects.getChildren().forEach(obj => {
-            if(obj.id == id) {
+            if(obj.id == objId) {
                 obj.destroy();
             }
         });
+        console.log("Deleting static object " + objId);
     }
     
-    function applyProperties(obj, spriteInfo) {
-        if(spriteInfo.scale) {
-            obj.setScale(spriteInfo.scale);
+    function applyDisplayProperties(objInfo, objModel) {
+        let scale = objInfo.not_pixel_art ? 1.0 : MAP_SCALE;
+        if(objInfo.scale) {
+            scale *= objInfo.scale;
         }
-        if(spriteInfo.group) {
-            scene[spriteInfo.group].add(obj);
-        }
-        if(spriteInfo.bounce) {
-            obj.body.setBounce(spriteInfo.bounce, spriteInfo.bounce);
-        }
-        if(spriteInfo.drag) {
-            obj.body.setDrag(spriteInfo.drag, spriteInfo.drag);
-        }
-        if(spriteInfo.radius) {
-            obj.body.setCircle(obj.body.width / 2.0);
-        }
+        objModel.setScale(scale);
     }
 
     /* UPDATE */
     function update() {
         // If camera is not attached, look for player to attach
-        if(!isCameraAttached && players.hasOwnProperty(socket.id)) {
-            const selfPlayer = players[socket.id].obj;
+        if(!isCameraAttached && playerModels.hasOwnProperty(socket.id)) {
+            const selfPlayer = playerModels[socket.id].obj;
             scene.cameras.main.startFollow(selfPlayer, false, CAMERA_SPEED, CAMERA_SPEED);
             isCameraAttached = true;
         }
@@ -292,17 +261,20 @@ const Game = (() => {
             return emitter;
         },
         
-        spawnStaticObject(x, y, sprite) {
-            const info = {
-                x: x,
-                y: y,
-                sprite: sprite
-            };
-            socket.emit("spawnStaticObject", info);
+        spawnStaticObject(objPreset, worldX, worldY) {
+            socket.emit("spawnStaticObject", objPreset, worldX, worldY);
         },
         
-        despawnStaticObject(id) {
-            socket.emit("despawnStaticObject", id);
+        removeStaticObject(objId) {
+            socket.emit("removeStaticObject", objId);
+        },
+        
+        spawnDynamicObject(objPreset, worldX, worldY) {
+            socket.emit("spawnDynamicObject", objPreset, worldX, worldY);
+        },
+        
+        removeDynamicObject(objId) {
+            socket.emit("removeDynamicObject", objId);
         },
         
         getGame() {
@@ -318,7 +290,7 @@ const Game = (() => {
         },
         
         getOtherPlayers() {
-            return players;
+            return playerModels;
         }
     };
 })();

@@ -21,6 +21,8 @@ const DASH_VELOCITY = 500;
 const MAX_DASH_TIME = 250;
 const MAX_DASH_COOLDOWN = 100;
 const WALL_BOUNDS_SIZE = 100;
+const MAP_SCALE = 8;
+const SPAWN_OFFSET = 100;
 const OBJECT_PRESETS = {
     "ball": {
         "sprite": "npc",
@@ -29,13 +31,20 @@ const OBJECT_PRESETS = {
         "bounce": 0.75,
         "drag": 100,
         "mass": 0.8,
-        "circle": true
+        "circle": true,
+        "not_pixel_art": true
+    },
+    "fence": {
+        "sprite": "fence"
     }
 };
 
 const WorldState = {
+    // All players can be walked through by default
     players: {},
+    // All static objects are never updated and cannot be walked through by default
     staticObjects: {},
+    // All dynamic objects have their positions updated every update and can be walked through by default
     dynamicObjects: {}
 };
 
@@ -47,45 +56,48 @@ let animalList = [];
 function preload() {
     // Loading the assets server-side is occasionally necessary to get
     // the right proportions, until they're not dependent on sprite size
-    this.load.image("floor", "assets/floor.png");
-    this.load.image("dust", "assets/dust.png");
-    this.load.image("circle", "assets/circle.png");
-    this.load.image("npc", "assets/npc.png");
-    this.load.image("other", "assets/other.png");
-    this.load.image("obstacle", "assets/obstacle.png");
+    this.load.image("map", "../public/assets/map.png");
+    this.load.image("dust", "../public/assets/dust.png");
+    this.load.image("circle", "../public/assets/circle.png");
+    this.load.image("npc", "../public/assets/npc.png");
+    this.load.image("other", "../public/assets/other.png");
+    this.load.image("obstacle", "../public/assets/obstacle.png");
+    this.load.image("fence", "../public/assets/fence.png");
     this.load.text("adjectives", "assets/adjectives.txt");
     this.load.text("animals", "assets/animals.txt");
 }
 
 function create() {
     const self = this;
-    
-    const background = this.add.image(0, 0, "floor")
+
+    const background = this.add.image(0, 0, "map")
+        .setScale(MAP_SCALE)
         .setOrigin(0, 0); // Center image
     this.xLimit = background.displayWidth;
     this.yLimit = background.displayHeight;
     setupBounds(self);
-    
+
     this.players = this.physics.add.group();
     this.dynamicObjects = this.physics.add.group();
     this.staticObjects = this.physics.add.staticGroup();
-    
+
     this.physics.add.collider(this.players, this.wallBounds);
     this.physics.add.collider(this.players, this.staticObjects);
-    
+
     this.balls = this.physics.add.group();
     this.physics.add.collider(this.balls, this.players);
     this.physics.add.collider(this.balls, this.balls);
     this.physics.add.collider(this.balls, this.staticObjects);
     this.physics.add.collider(this.balls, this.wallBounds);
-    
+
     // Load text files
     adjectiveList = loadTextFileAsArray(this, "adjectives");
     animalList = loadTextFileAsArray(this, "animals");
-    
+
     io.on("connection", function (client) {
-        let x = Math.floor(Math.random() * 700) + 50;
-        let y = Math.floor(Math.random() * 500) + 50;
+        let x = worldToImageX(self, Math.floor(Math.random() * 2.0 * SPAWN_OFFSET) - SPAWN_OFFSET);
+        let y = worldToImageY(self, Math.floor(Math.random() * 2.0 * SPAWN_OFFSET) - SPAWN_OFFSET);
+        console.log(x, y);
         let name = choice(adjectiveList) + " " + choice(animalList);
         let playerInfo = {
             playerId: client.id,
@@ -103,24 +115,40 @@ function create() {
             }
         };
         console.log("A user connected!!", client.id, "(" + name + ")");
-        
+
         addPlayer(self, playerInfo);
         client.emit("currentWorldState", WorldState);
         client.broadcast.emit("playerConnect", playerInfo);
-        
+
         client.on("disconnect", () => {
             console.log("A user disconnected!!", client.id);
             removePlayer(self, client.id);
             delete WorldState.players[client.id];
             client.broadcast.emit("playerDisconnect", client.id); // "disconnect" is reserved
         });
-        
+
         client.on("playerInput", inputData => {
             handlePlayerInput(self, client.id, inputData);
         });
+
+        client.on("spawnDynamicObject", (objPreset, worldX, worldY) => {
+            spawnDynamicObject(self, objPreset, worldX, worldY);
+        });
+
+        client.on("removeDynamicObject", objId => {
+            removeDynamicObject(self, objId);
+        });
         
+        client.on("spawnStaticObject", (objPreset, worldX, worldY) => {
+            spawnStaticObject(self, objPreset, worldX, worldY);
+        });
+
+        client.on("removeStaticObject", objId => {
+            removeStaticObject(self, objId);
+        });
+
     });
-    
+
     onServerStart(self);
 }
 
@@ -153,12 +181,11 @@ function update() {
         updatePlayer(self, player);
     });
     io.emit("playerStateUpdates", WorldState.players);
-    
+
     this.dynamicObjects.getChildren().forEach(obj => {
         updateDynamicObject(self, obj);
     });
     io.emit("dynamicObjectUpdates", WorldState.dynamicObjects);
-    
 }
 
 /* PLAYER */
@@ -211,12 +238,13 @@ function addPlayer(self, playerInfo) {
         x: playerInfo.x,
         y: playerInfo.y,
         sprite: "circle",
+        not_pixel_art: true,
         circle: true,
         scale: 0.5
     }, self.players);
-    
+
     player.dashStart = -999;
-    
+
     player.playerId = playerInfo.playerId;
     WorldState.players[playerInfo.playerId] = playerInfo;
 }
@@ -231,9 +259,9 @@ function removePlayer(self, playerId) {
 
 function handlePlayerInput(self, playerId, input) {
     self.players.getChildren().forEach(player => {
-       if(playerId === player.playerId) {
-           WorldState.players[playerId].input = input;
-       } 
+        if(playerId === player.playerId) {
+            WorldState.players[playerId].input = input;
+        }
     });
 }
 
@@ -244,7 +272,9 @@ function updateDynamicObject(self, obj) {
     objInfo.y = obj.y;
 }
 
-function spawnDynamicObject(self, objPreset, x, y) {
+function spawnDynamicObject(self, objPreset, worldX, worldY) {
+    const imageX = worldToImageX(self, worldX);
+    const imageY = worldToImageY(self, worldY);
     if(typeof objPreset === "string") {
         if(OBJECT_PRESETS.hasOwnProperty(objPreset)) {
             objPreset = OBJECT_PRESETS[objPreset];
@@ -253,13 +283,13 @@ function spawnDynamicObject(self, objPreset, x, y) {
             return;
         }
     }
-    
+
     const objInfo = Object.assign({
         id: generateUUID(),
-        x: x,
-        y: y
+        x: imageX,
+        y: imageY
     }, objPreset);
-    
+
     addDynamicObject(self, objInfo);
 }
 
@@ -267,6 +297,9 @@ function addDynamicObject(self, objInfo) {
     const obj = createGenericObject(self, objInfo, self.dynamicObjects);
     obj.id = objInfo.id;
     WorldState.dynamicObjects[objInfo.id] = objInfo;
+    // using sprite as type for now, should use objType in the future (type is reserved)
+    console.log("Created dynamic object \"" + objInfo.sprite + "\" with id " + objInfo.id);
+    io.emit("dynamicObjectSpawned", objInfo);
 }
 
 function removeDynamicObject(self, objId) {
@@ -275,31 +308,79 @@ function removeDynamicObject(self, objId) {
             obj.destroy();
         }
     });
+    delete WorldState.dynamicObjects[objId];
+    console.log("Deleted dynamic object with id " + objId);
+    io.emit("dynamicObjectDeleted", objId);
+}
+
+function spawnStaticObject(self, objPreset, worldX, worldY) {
+    const imageX = worldToImageX(self, worldX);
+    const imageY = worldToImageY(self, worldY);
+    if(typeof objPreset === "string") {
+        if(OBJECT_PRESETS.hasOwnProperty(objPreset)) {
+            objPreset = OBJECT_PRESETS[objPreset];
+        } else {
+            console.log("Preset not found!");
+            return;
+        }
+    }
+
+    const objInfo = Object.assign({
+        id: generateUUID(),
+        x: imageX,
+        y: imageY
+    }, objPreset);
+
+    addStaticObject(self, objInfo);
+}
+
+function addStaticObject(self, objInfo) {
+    const obj = createGenericObject(self, objInfo, self.staticObjects);
+    obj.id = objInfo.id;
+    WorldState.staticObjects[objInfo.id] = objInfo;
+    console.log("Created static object \"" + objInfo.sprite + "\" with id " + objInfo.id);
+    io.emit("staticObjectSpawned", objInfo);
+}
+
+function removeStaticObject(self, objId) {
+    self.staticObjects.getChildren().forEach(obj => {
+        if(objId === obj.id) {
+            obj.destroy();
+        }
+    });
+    delete WorldState.staticObjects[objId];
+    console.log("Deleted static object with id " + objId);
+    if(!noUpdate) {
+        io.emit("staticObjectDeleted", objId);
+    }
 }
 
 function createGenericObject(self, settings, mainGroup) {
     const obj = self.physics.add.image(settings.x, settings.y, settings.sprite)
         .setOrigin(0.5);
-    
+
     if(mainGroup) {
         mainGroup.add(obj);
     }
     if(settings.group) {
         self[settings.group].add(obj);
     }
-    
+
     if(settings.circle) {
         obj.body.setCircle(obj.body.width / 2.0);
     }
 
+    let scale = settings.not_pixel_art ? 1.0 : MAP_SCALE;
     if(settings.scale) {
-        obj.setScale(settings.scale);
+        scale *= settings.scale;
     }
+    obj.setScale(scale);
+    console.log(obj.displayWidth, obj.displayHeight, obj.body.width, obj.body.height);
 
     if(settings.bounce) {
         obj.setBounce(settings.bounce, settings.bounce);
     }
-    
+
     if(settings.mass) {
         obj.setMass(settings.mass);
     }
@@ -307,7 +388,6 @@ function createGenericObject(self, settings, mainGroup) {
     if(settings.drag) {
         obj.setDrag(settings.drag, settings.drag);
     }
-    
 
     return obj;
 }
@@ -316,7 +396,7 @@ function onServerStart(self) {
     console.log("Server ready!");
     spawnDynamicObject(self, "ball", 200, 200);
     spawnDynamicObject(self, "ball", 400, 400);
-    
+
     // Pool
     spawnDynamicObject(self, "ball", 500, 300);
     spawnDynamicObject(self, "ball", 500, 500);
@@ -325,6 +405,8 @@ function onServerStart(self) {
     spawnDynamicObject(self, "ball", 500, 570);
     spawnDynamicObject(self, "ball", 550, 570);
     spawnDynamicObject(self, "ball", 450, 570);
+    
+    spawnStaticObject(self, "fence", 0, 0);
 }
 
 const game = new Phaser.Game(config);

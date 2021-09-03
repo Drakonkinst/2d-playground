@@ -8,3 +8,19 @@ function generateUUID() {
         return v.toString(16);
     });
 }
+
+function imageToWorldX(self, imageX) {
+    return imageX - (self.xLimit / 2.0);
+}
+
+function imageToWorldY(self, imageY) {
+    return imageY - (self.yLimit / 2.0);
+}
+
+function worldToImageX(self, worldX) {
+    return worldX + (self.xLimit / 2.0);
+}
+
+function worldToImageY(self, worldY) {
+    return worldY + (self.yLimit / 2.0);    
+}
